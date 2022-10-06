@@ -1,0 +1,85 @@
+#
+# Copyright 2022 The Dapr Authors
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#     http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+name: conformance-test
+
+env:
+  # Version of Go
+  GOVER: "1.19"
+  # Dapr Socket folder
+  DAPR_COMPONENT_SOCKET_FOLDER: /tmp
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: jsonlogic
+            type: bindings
+            operations: |
+              - operations
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: setup go
+        uses: actions/setup-go@v3
+        with:
+          go-version: ${{ env.GOVER }}
+
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      - name: Run ${{matrix.component}} dependencies
+        shell: bash
+        run: |
+          DEPENDENCIES=${{matrix.component}}/docker-compose.dependencies.yml
+          if [ -e $DEPENDENCIES ]; then
+              docker-compose -f $DEPENDENCIES up -d
+          fi
+
+      - name: Compile ${{matrix.component}} as a plugin
+        shell: bash
+        run: |
+          COMPONENTS=${{matrix.component}} make build-all
+
+      - name: Run components
+        shell: bash
+        run: go run main.go
+
+      - name: Wait for socket
+        shell: bash
+        run: |
+          until [ -S ${{ env.DAPR_COMPONENT_SOCKET_FOLDER }}/${{ matrix.component }}.sock ]
+          do
+              sleep 5
+              echo ">>> waiting for socket creation... sleeping"
+          done
+
+      - name: Conformance Tests
+        uses: mcandeia/action-dapr-conformance-tests@v1
+        with:
+          socket: ${{ env.DAPR_COMPONENT_SOCKET_FOLDER }}/${{ matrix.component }}.sock
+          type: ${{ matrix.type }}
+          metadata: ${{ matrix.metadata }}
+          operations: ${{ matrix.operations }}
+          test_config: ${{ matrix.test_config }}

@@ -17,7 +17,8 @@
 
 export GO111MODULE ?= on
 
-COMPONENTS=jsonlogic
+COMPONENTS=jsonlogic \
+ledger \
 
 COMPONENTS_FOLDER=./components
 
@@ -35,4 +36,4 @@ BUILD_COMPONENTS:=$(foreach ITEM,$(COMPONENTS),build-plugin-$(ITEM))
 .PHONY: build-all
 build-all: $(BUILD_COMPONENTS)
 
-$(shell mkdir -p $(COMPONENTS_FOLDER))
+$(shell rm -rf $(COMPONENTS_FOLDER) && mkdir -p $(COMPONENTS_FOLDER))

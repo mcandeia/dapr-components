@@ -99,20 +99,6 @@ func (agg *Agg) WithChange(state []byte) {
 	agg.uncommitted = append(agg.uncommitted, state)
 }
 
-func (agg *Agg) preparePersistNoDirty() keyvalue.Value[State] {
-	return agg.preparePersist(nil, true, time.Now().UTC())
-}
-
-func (agg *Agg) preparePersist(transactionID *string, committed bool, startedAt time.Time) keyvalue.Value[State] {
-	return keyvalue.Value[State]{
-		Content: State{
-			Events: agg.eventsWith(transactionID, committed, startedAt),
-			Dirty:  !committed,
-		},
-		Version: agg.Version,
-	}
-}
-
 func (agg *Agg) eventsWith(transactionID *string, committed bool, startedAt time.Time) []Event {
 	pendingEvents := make([]Event, len(agg.uncommitted))
 
@@ -127,6 +113,20 @@ func (agg *Agg) eventsWith(transactionID *string, committed bool, startedAt time
 		pendingEvents[len(pendingEvents)-idx-1] = event // back to front
 	}
 	return append(pendingEvents, agg.Events...)
+}
+
+func (agg *Agg) preparePersist(transactionID *string, committed bool, startedAt time.Time) keyvalue.Value[State] {
+	return keyvalue.Value[State]{
+		Content: State{
+			Events: agg.eventsWith(transactionID, committed, startedAt),
+			Dirty:  !committed,
+		},
+		Version: agg.Version,
+	}
+}
+
+func (agg *Agg) preparePersistNoDirty() keyvalue.Value[State] {
+	return agg.preparePersist(nil, true, time.Now().UTC())
 }
 
 type State struct {

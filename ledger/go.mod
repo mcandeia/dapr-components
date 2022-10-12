@@ -7,9 +7,15 @@ replace github.com/mcandeia/dapr-components/internal => ../internal
 require (
 	github.com/dapr-sandbox/components-go-sdk v0.0.0-20221003195517-c90c5baa2b8d
 	github.com/dapr/components-contrib v1.9.0-rc.1
+	github.com/mcandeia/dapr-components/internal v0.0.0-00010101000000-000000000000
+	github.com/stretchr/testify v1.8.0
 )
 
-require gopkg.in/yaml.v3 v3.0.1 // indirect
+require (
+	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
+)
 
 require (
 	github.com/dapr/dapr v1.9.0-rc.1 // indirect

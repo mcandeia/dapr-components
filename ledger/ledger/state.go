@@ -15,13 +15,13 @@ package ledger
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"time"
 
 	contribState "github.com/dapr/components-contrib/state"
 	dapr "github.com/dapr/go-sdk/client"
 	"github.com/dapr/kit/ptr"
+	"github.com/mcandeia/dapr-components/internal"
 	"github.com/mcandeia/dapr-components/ledger/aggregate"
 	"github.com/mcandeia/dapr-components/ledger/keyvalue"
 	"github.com/mcandeia/dapr-components/ledger/transaction"
@@ -88,7 +88,11 @@ func (s *ledger) Multi(request *contribState.TransactionalStateRequest) error {
 	}
 
 	for k, u := range uncommitted {
-		batch.WithChange(k, u)
+		for _, change := range u {
+			if err := batch.WithChange(k, change); err != nil {
+				return err
+			}
+		}
 	}
 	return persist()
 }
@@ -180,18 +184,13 @@ func (s *ledger) BulkGet(req []contribState.GetRequest) (bool, []contribState.Bu
 	result := make([]contribState.BulkGetResponse, len(req))
 	for idx, key := range keys {
 		state, version := batch.State(key)
-		var (
-			contentBytes []byte
-			err          error
-		)
-		if state != nil {
-			contentBytes, err = json.Marshal(state)
-		}
 		result[idx] = contribState.BulkGetResponse{
-			Key:         key,
-			Data:        contentBytes,
-			ETag:        &version,
-			Error:       err.Error(),
+			Key:  key,
+			Data: state,
+			ETag: &version,
+			Error: internal.Ternary(err == nil, internal.Always(""), func() string {
+				return err.Error()
+			}),
 			ContentType: ptr.Of("application/json"),
 		}
 	}

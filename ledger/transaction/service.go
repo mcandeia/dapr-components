@@ -34,8 +34,9 @@ const (
 )
 
 type Transaction struct {
-	Status    TransactionStatus `json:"status"`
-	StartedAt time.Time         `json:"startedAt"`
+	Status      TransactionStatus `json:"status"`
+	StartedAt   time.Time         `json:"startedAt"`
+	CommittedAt time.Time         `json:"comittedAt"`
 }
 
 func (t Transaction) HasTimedOut() bool {
@@ -52,8 +53,9 @@ func (t Transaction) Aborted() bool {
 
 func (t Transaction) Commit() Transaction {
 	return Transaction{
-		Status:    COMMITTED,
-		StartedAt: t.StartedAt,
+		Status:      COMMITTED,
+		StartedAt:   t.StartedAt,
+		CommittedAt: time.Now().UTC(),
 	}
 }
 
@@ -93,13 +95,14 @@ func (s *svc) WithinTransaction(ctx context.Context, exec func(transactionID str
 	reqFinished := sync.WaitGroup{}
 	reqFinished.Add(2)
 	go func() {
+		defer reqFinished.Done()
 		if err := exec(transactionID, startedAt); err != nil {
 			errChan <- err
 		}
-		reqFinished.Done()
 	}()
 
 	go func() {
+		defer reqFinished.Done()
 		err := s.transactions.BulkSet(ctx, map[string]keyvalue.Value[Transaction]{
 			transactionID: {
 				Content: aggTransaction,
@@ -108,7 +111,6 @@ func (s *svc) WithinTransaction(ctx context.Context, exec func(transactionID str
 		if err != nil {
 			errChan <- err
 		}
-		reqFinished.Done()
 	}()
 
 	go func() {

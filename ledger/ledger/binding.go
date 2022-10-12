@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	contribBindings "github.com/dapr/components-contrib/bindings"
 	"github.com/dapr/components-contrib/state"
@@ -40,6 +41,18 @@ func (j *journal) Init(metadata contribBindings.Metadata) error {
 		Base: metadata.Base,
 	})
 }
+
+type RawBytes []byte
+
+func (r RawBytes) MarshalJSON() ([]byte, error) {
+	return r, nil
+}
+
+type EventData struct {
+	State RawBytes  `json:"state"`
+	Date  time.Time `json:"date"`
+}
+
 func (j *journal) Invoke(ctx context.Context, req *contribBindings.InvokeRequest) (*contribBindings.InvokeResponse, error) {
 	key, ok := req.Metadata[keyMetadataKey]
 	if !ok {
@@ -52,7 +65,15 @@ func (j *journal) Invoke(ctx context.Context, req *contribBindings.InvokeRequest
 		if err != nil {
 			return nil, err
 		}
-		bts, err := json.Marshal(events)
+		result := make([]EventData, len(events))
+
+		for idx, evnt := range events {
+			result[idx] = EventData{
+				State: evnt.State,
+				Date:  evnt.CreatedAt,
+			}
+		}
+		bts, err := json.Marshal(result)
 		if err != nil {
 			return nil, err
 		}

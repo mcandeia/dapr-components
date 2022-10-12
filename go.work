@@ -3,3 +3,5 @@ go 1.19
 use ./jsonlogic
 
 use ./ledger
+
+use ./internal

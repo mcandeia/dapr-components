@@ -20,6 +20,12 @@ import (
 	"strings"
 
 	dapr "github.com/dapr/go-sdk/client"
+	internal "github.com/mcandeia/dapr-components/internal"
+)
+
+const (
+	daprKeySeparator      = "||"
+	ledgerPrefixSeparator = "__"
 )
 
 type daprClient interface {
@@ -36,24 +42,27 @@ type daprState[T any] struct {
 }
 
 func sanitize(str string) string {
-	return strings.ReplaceAll(str, "||", "__")
+	return strings.Replace(str, daprKeySeparator, ledgerPrefixSeparator, 1)
 }
 func (d *daprState[T]) addPrefix(key string) string {
 	return sanitize(d.keyPrefix + "_" + key)
 }
 
 func (d *daprState[T]) removePrefix(key string) string {
-	return key[(len(d.keyPrefix) + 1):]
+	return strings.Replace(key[(len(d.keyPrefix)+1):], ledgerPrefixSeparator, daprKeySeparator, 1)
 }
 
 // Get returns a value and its associated version
 func (d *daprState[T]) BulkGet(ctx context.Context, keys []string) (map[string]Value[T], error) {
+	if len(keys) == 0 {
+		return make(map[string]Value[T]), nil
+	}
 	prefixedKeys := make([]string, len(keys))
 	for idx, key := range keys {
 		prefixedKeys[idx] = d.addPrefix(key)
 	}
 	result := make(map[string]Value[T], len(keys))
-	resp, err := d.daprClient.GetBulkState(ctx, d.store, prefixedKeys, make(map[string]string), int32(len(keys)))
+	resp, err := d.daprClient.GetBulkState(ctx, d.store, prefixedKeys, map[string]string{"content-type": "application/json"}, int32(len(keys)))
 	if err != nil {
 		return nil, err
 	}
@@ -105,8 +114,11 @@ func (d *daprState[T]) BulkSet(ctx context.Context, values map[string]Value[T]) 
 			Value: value,
 			Etag:  etag,
 			Options: &dapr.StateOptions{
-				Concurrency: dapr.StateConcurrencyFirstWrite,
+				Concurrency: internal.Ternary(etag == nil, internal.Always(dapr.StateConcurrencyLastWrite), internal.Always(dapr.StateConcurrencyFirstWrite)),
 				Consistency: dapr.StateConsistencyStrong,
+			},
+			Metadata: map[string]string{
+				"content-type": "application/json",
 			},
 		}
 		idx++

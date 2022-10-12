@@ -11,23 +11,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package internal
 
-import (
-	dapr "github.com/dapr-sandbox/components-go-sdk"
-	"github.com/dapr-sandbox/components-go-sdk/bindings/v1"
-	"github.com/dapr-sandbox/components-go-sdk/state/v1"
+// Always returns a function that wrap the value
+func Always[T any](value T) func() T {
+	return func() T {
+		return value
+	}
+}
 
-	ledger "github.com/mcandeia/dapr-components/ledger/ledger"
-)
-
-func init() {
-	dapr.Register("ledger",
-		dapr.WithStateStore(func() state.Store {
-			return ledger.New()
-		}),
-		dapr.WithOutputBinding(func() bindings.OutputBinding {
-			return ledger.NewJournal()
-		}),
-	)
+// WrapF returns a function that waits to be called to apply the parameter.
+func WrapF[From any, To any](applier func(From) To, from From) func() To {
+	return func() To {
+		return applier(from)
+	}
 }

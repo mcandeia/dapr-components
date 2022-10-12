@@ -15,9 +15,11 @@ package aggregate
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
+	"github.com/dapr/components-contrib/state/utils"
 	"github.com/mcandeia/dapr-components/ledger/keyvalue"
 	"github.com/mcandeia/dapr-components/ledger/transaction"
 )
@@ -28,7 +30,7 @@ type Service interface {
 }
 
 type Event struct {
-	State         any       `json:"state"`
+	State         []byte    `json:"state"`
 	Uncommitted   bool      `json:"uncommitted"`
 	TransactionID *string   `json:"transactionId"`
 	Deleted       bool      `json:"deleted"`
@@ -38,7 +40,7 @@ type Event struct {
 func (evt Event) confirmed() Event {
 	return Event{
 		State:         evt.State,
-		Uncommitted:   evt.Uncommitted,
+		Uncommitted:   false,
 		TransactionID: evt.TransactionID,
 		Deleted:       evt.Deleted,
 		CreatedAt:     evt.CreatedAt,
@@ -50,13 +52,17 @@ type AggBatch struct {
 	hasUncommitted bool
 }
 
-func (agg *AggBatch) WithChange(id string, state any) *AggBatch {
-	agg.batch[id].WithChange(state)
+func (agg *AggBatch) WithChange(id string, state any) error {
+	serialized, err := utils.Marshal(state, json.Marshal)
+	if err != nil {
+		return err
+	}
+	agg.batch[id].WithChange(serialized)
 	agg.hasUncommitted = true
-	return agg
+	return nil
 }
 
-func (agg *AggBatch) State(id string) (any, string) {
+func (agg *AggBatch) State(id string) ([]byte, string) {
 	return agg.batch[id].CurrentState()
 }
 func (agg *AggBatch) History(id string) []Event {
@@ -65,7 +71,7 @@ func (agg *AggBatch) History(id string) []Event {
 
 type Agg struct {
 	Events      []Event
-	uncommitted []any
+	uncommitted [][]byte
 	Version     string
 }
 
@@ -80,7 +86,7 @@ func (agg *Agg) History() []Event {
 	return events
 }
 
-func (agg *Agg) CurrentState() (any, string) {
+func (agg *Agg) CurrentState() ([]byte, string) {
 	for _, evnt := range agg.Events {
 		if !evnt.Uncommitted {
 			return evnt.State, agg.Version
@@ -89,12 +95,8 @@ func (agg *Agg) CurrentState() (any, string) {
 	return nil, agg.Version
 }
 
-func (agg *Agg) WithChange(state any) {
+func (agg *Agg) WithChange(state []byte) {
 	agg.uncommitted = append(agg.uncommitted, state)
-}
-
-func (agg *Agg) Deleted() {
-	agg.uncommitted = append(agg.uncommitted, nil)
 }
 
 func (agg *Agg) eventsWith(transactionID *string, committed bool, startedAt time.Time) []Event {
@@ -108,9 +110,9 @@ func (agg *Agg) eventsWith(transactionID *string, committed bool, startedAt time
 			Deleted:       uncommitted == nil,
 			CreatedAt:     startedAt,
 		}
-		pendingEvents[idx] = event
+		pendingEvents[len(pendingEvents)-idx-1] = event // back to front
 	}
-	return append(agg.Events, pendingEvents...)
+	return append(pendingEvents, agg.Events...)
 }
 
 type State struct {
@@ -123,14 +125,10 @@ type svc struct {
 	tSvc   transaction.Service
 }
 
-var noOpCommit = func() error {
-	return nil
-}
-
 type uncommitted struct {
 	agg      *Agg
 	eventIdx int
-	event    *Event
+	event    Event
 }
 
 func (u *uncommitted) apply(t *transaction.Transaction) {
@@ -138,7 +136,7 @@ func (u *uncommitted) apply(t *transaction.Transaction) {
 		// remove aborted event
 		u.agg.Events = append(u.agg.Events[:u.eventIdx], u.agg.Events[u.eventIdx+1:]...)
 	} else {
-		u.event.Uncommitted = false
+		u.agg.Events[u.eventIdx] = u.event.confirmed()
 	}
 }
 
@@ -218,18 +216,13 @@ func (s *svc) GetBatch(ctx context.Context, ids []string) (aggs *AggBatch, persi
 		for idx, event := range state.Content.Events {
 			if event.Uncommitted && event.TransactionID != nil {
 				transactionsKeys = append(transactionsKeys, *event.TransactionID)
-				eventCopy := &event //shallow copy due to loop
 				eventsToCheck[*event.TransactionID] = append(eventsToCheck[*event.TransactionID], &uncommitted{
 					agg:      aggs.batch[key],
 					eventIdx: idx,
-					event:    eventCopy,
+					event:    event,
 				})
 			}
 		}
-	}
-
-	if len(transactionsKeys) == 0 {
-		return aggs, noOpCommit, nil
 	}
 
 	transactions, err := s.tSvc.BulkGet(ctx, transactionsKeys)
@@ -272,6 +265,7 @@ func (s *svc) GetBatch(ctx context.Context, ids []string) (aggs *AggBatch, persi
 
 func NewService(tSvc transaction.Service, events keyvalue.Versioned[State]) Service {
 	return &svc{
+		tSvc:   tSvc,
 		events: events,
 	}
 }

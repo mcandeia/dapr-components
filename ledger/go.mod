@@ -2,6 +2,8 @@ module github.com/mcandeia/dapr-components/ledger
 
 go 1.19
 
+replace github.com/mcandeia/dapr-components/internal => ../internal
+
 require (
 	github.com/dapr-sandbox/components-go-sdk v0.0.0-20221003195517-c90c5baa2b8d
 	github.com/dapr/components-contrib v1.9.0-rc.1

@@ -53,6 +53,7 @@ func (s *ledger) Init(metadata contribState.Metadata) error {
 	}
 
 	go func() {
+		// FIXME racing condition between dapr initialization and component initialization
 		<-time.After(4 * time.Second)
 		daprClient, err := dapr.NewClientWithPort(daprPort)
 		if err != nil {

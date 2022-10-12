@@ -99,6 +99,20 @@ func (agg *Agg) WithChange(state []byte) {
 	agg.uncommitted = append(agg.uncommitted, state)
 }
 
+func (agg *Agg) preparePersistNoDirty() keyvalue.Value[State] {
+	return agg.preparePersist(nil, true, time.Now().UTC())
+}
+
+func (agg *Agg) preparePersist(transactionID *string, committed bool, startedAt time.Time) keyvalue.Value[State] {
+	return keyvalue.Value[State]{
+		Content: State{
+			Events: agg.eventsWith(transactionID, committed, startedAt),
+			Dirty:  !committed,
+		},
+		Version: agg.Version,
+	}
+}
+
 func (agg *Agg) eventsWith(transactionID *string, committed bool, startedAt time.Time) []Event {
 	pendingEvents := make([]Event, len(agg.uncommitted))
 
@@ -146,15 +160,8 @@ func (s *svc) commitOnTransaction(ctx context.Context, aggs map[string]*Agg) err
 		for k := range aggs {
 			firstKey = k
 		}
-		first := aggs[firstKey]
 		return s.events.BulkSet(ctx, map[string]keyvalue.Value[State]{
-			firstKey: {
-				Content: State{
-					Events: first.eventsWith(nil, true, time.Now().UTC()),
-					Dirty:  false,
-				},
-				Version: first.Version,
-			},
+			firstKey: aggs[firstKey].preparePersistNoDirty(),
 		})
 	}
 
@@ -162,15 +169,9 @@ func (s *svc) commitOnTransaction(ctx context.Context, aggs map[string]*Agg) err
 	err := s.tSvc.WithinTransaction(ctx, func(transactionID string, startedAt time.Time) error {
 		uncommittedChanges := make(map[string]keyvalue.Value[State])
 		idx := 0
-		for k, agg := range aggs {
-			uncommittedChanges[k] = keyvalue.Value[State]{
-				Content: State{
-					Events: agg.eventsWith(&transactionID, false, startedAt),
-					Dirty:  true,
-				},
-				Version: agg.Version,
-			}
-			aggsKeys[idx] = k
+		for key, agg := range aggs {
+			uncommittedChanges[key] = agg.preparePersist(&transactionID, false, startedAt)
+			aggsKeys[idx] = key
 			idx++
 		}
 
@@ -250,14 +251,8 @@ func (s *svc) GetBatch(ctx context.Context, ids []string) (aggs *AggBatch, persi
 			return s.commitOnTransaction(ctx, aggs.batch)
 		}
 		uncommittedChanges := make(map[string]keyvalue.Value[State])
-		for k, agg := range aggs.batch {
-			uncommittedChanges[k] = keyvalue.Value[State]{
-				Content: State{
-					Events: agg.Events,
-					Dirty:  false,
-				},
-				Version: agg.Version,
-			}
+		for key, agg := range aggs.batch {
+			uncommittedChanges[key] = agg.preparePersistNoDirty()
 		}
 		return s.events.BulkSet(ctx, uncommittedChanges)
 	}, nil

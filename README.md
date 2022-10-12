@@ -9,5 +9,12 @@ This project uses [Go Plugins](https://pkg.go.dev/plugin), it compiles the compo
 You can select a subset of all components by just providing `COMPONENTS=` environment variable.
 
 ```shell
-COMPONENTS=jsonlogic aws-qldb make build-all
+COMPONENTS="jsonlogic aws-qldb" make build-all
 ```
+
+## Components
+
+| Component                         | Description                                                                                                                                                                                                                                                                                                                                                 | Types                                   |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| [jsonlogic](/tree/main/jsonlogic) | OutputBinding for https://jsonlogic.com/, evaluates jsonlogic expressions based on requested data return its results                                                                                                                                                                                                                                        | OutputBinding                           |
+| [ledger](/tree/main/ledger)       | Ledger is a journal-first storage that leverages any Dapr statestore to create an EventStore facade that you can configure snapshots, execute time-based queries and do transacional updates across aggregates, also, it supports at-least-once delivery via Dapr InputBinding component, you can also executes "history" operation using the outputbinding | InputBinding, OutputBinding, StateStore |

@@ -1,0 +1,25 @@
+
+POST http://localhost:3500/v1.0/state/ledger HTTP/1.1
+content-type: application/json
+
+[
+    { "key": "name", "value": { "test": 12453 }, "metadata": {"content-type": "application/json"} },
+    { "key": "name", "value": { "test": 1245355 }, "metadata": {"content-type": "application/json"} },
+    { "key": "name2", "value": { "test": 12453335 }, "metadata": {"content-type": "application/json"} }
+
+]
+
+###
+
+GET http://localhost:3500/v1.0/state/ledger/name2
+
+###
+POST http://localhost:3500/v1.0/bindings/ledger-history
+content-type: application/json
+
+{
+    "operation": "history",
+    "metadata": {
+        "key": "myapp||name"
+    }
+}

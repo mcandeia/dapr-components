@@ -14,159 +14,335 @@ limitations under the License.
 package aggregate
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/mcandeia/dapr-components/ledger/keyvalue"
 	"github.com/mcandeia/dapr-components/ledger/transaction"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestEvents(t *testing.T) {
-	t.Run("event confirm should set uncommitted to false", func(t *testing.T) {
-		event := Event{}
-		assert.False(t, event.confirmed().Uncommitted)
-	})
+type fakeTransactionSvc struct {
+	bulkGetCalled             atomic.Int64
+	bulkGetResp               map[string]*transaction.Transaction
+	bulkGetErr                error
+	onBulkGetCalled           func([]string)
+	withinTransactionCalled   atomic.Int64
+	withinTransactionErr      error
+	onWithinTransactionCalled func(func(transactionID string, startedAt time.Time) error) error
 }
 
-func TestAggBatch(t *testing.T) {
-	t.Run("WithChange should set to uncommitted and add change", func(t *testing.T) {
-		const fakeID = "fake-id"
-		agg := &AggBatch{
-			batch: map[string]*Agg{
-				fakeID: {},
-			},
-			hasUncommitted: false,
-		}
-		require.NoError(t, agg.WithChange(fakeID, []byte(``)))
-
-		assert.True(t, agg.hasUncommitted)
-
-		assert.NotEmpty(t, agg.batch[fakeID].uncommitted)
-	})
-
-	t.Run("State should return nil when has only uncommitted events", func(t *testing.T) {
-		const fakeID = "fake-id"
-		agg := &AggBatch{
-			batch: map[string]*Agg{
-				fakeID: {},
-			},
-			hasUncommitted: false,
-		}
-		require.NoError(t, agg.WithChange(fakeID, []byte(``)))
-
-		assert.True(t, agg.hasUncommitted)
-
-		state, version := agg.State(fakeID)
-
-		assert.Nil(t, state)
-		assert.Empty(t, version)
-	})
-
-	t.Run("State should return state when has committed events", func(t *testing.T) {
-		const fakeID = "fake-id"
-		agg := &AggBatch{
-			batch: map[string]*Agg{
-				fakeID: {},
-			},
-			hasUncommitted: false,
-		}
-		require.NoError(t, agg.WithChange(fakeID, []byte(``)))
-
-		assert.True(t, agg.hasUncommitted)
-
-		agg.batch[fakeID].Events = agg.batch[fakeID].eventsWith(nil, true, time.Now().UTC())
-
-		state, _ := agg.State(fakeID)
-
-		assert.NotNil(t, state)
-	})
-
-	t.Run("History should be empty when has only uncommitted events", func(t *testing.T) {
-		const fakeID = "fake-id"
-		agg := &AggBatch{
-			batch: map[string]*Agg{
-				fakeID: {},
-			},
-			hasUncommitted: false,
-		}
-		require.NoError(t, agg.WithChange(fakeID, []byte(``)))
-
-		assert.True(t, agg.hasUncommitted)
-
-		events := agg.History(fakeID)
-
-		assert.Empty(t, events)
-	})
-
-	t.Run("preparePersistNoDirty should not save as dirty state", func(t *testing.T) {
-		const fakeID = "fake-id"
-		agg := &AggBatch{
-			batch: map[string]*Agg{
-				fakeID: {},
-			},
-			hasUncommitted: false,
-		}
-		require.NoError(t, agg.WithChange(fakeID, []byte(``)))
-		assert.True(t, agg.hasUncommitted)
-		state := agg.batch[fakeID].preparePersistNoDirty()
-
-		assert.False(t, state.Content.Dirty)
-		assert.NotEmpty(t, state.Content.Events)
-	})
-
-	t.Run("preparePersist should not save as dirty state", func(t *testing.T) {
-		const fakeID = "fake-id"
-		agg := &AggBatch{
-			batch: map[string]*Agg{
-				fakeID: {},
-			},
-			hasUncommitted: false,
-		}
-		require.NoError(t, agg.WithChange(fakeID, []byte(``)))
-		assert.True(t, agg.hasUncommitted)
-		state := agg.batch[fakeID].preparePersist(nil, false, time.Now().UTC())
-
-		assert.False(t, !state.Content.Dirty)
-		assert.NotEmpty(t, state.Content.Events)
-	})
+func (f *fakeTransactionSvc) BulkGet(ctx context.Context, ids []string) (map[string]*transaction.Transaction, error) {
+	f.bulkGetCalled.Add(1)
+	if f.onBulkGetCalled != nil {
+		f.onBulkGetCalled(ids)
+	}
+	return f.bulkGetResp, f.bulkGetErr
+}
+func (f *fakeTransactionSvc) WithinTransaction(_ context.Context, funcs func(transactionID string, startedAt time.Time) error) error {
+	f.withinTransactionCalled.Add(1)
+	if f.onWithinTransactionCalled != nil {
+		return f.onWithinTransactionCalled(funcs)
+	}
+	return f.withinTransactionErr
 }
 
-func TestUncommitted(t *testing.T) {
-	t.Run("uncommitted should remove event when transaction is aborted", func(t *testing.T) {
-		agg := &Agg{}
-		agg.WithChange([]byte(``))
-		agg.Events = agg.eventsWith(nil, false, time.Now().UTC())
-		u := &uncommitted{
-			agg:      agg,
-			eventIdx: 0,
-			event:    agg.Events[0],
-		}
-		time.Now().UTC()
-		u.apply(&transaction.Transaction{
-			Status:    transaction.STARTED,
-			StartedAt: time.Now().UTC().Add(-(2 * time.Minute)),
-		})
+type fakeEvents struct {
+	bulkGetCalled   atomic.Int64
+	bulkGetResp     map[string]keyvalue.Value[State]
+	bulkGetErr      error
+	onBulkGetCalled func([]string)
+	bulkSetCalled   atomic.Int64
+	bulkSetErr      error
+	onBulkSetCalled func(map[string]keyvalue.Value[State])
+}
 
-		assert.Empty(t, agg.Events)
+func (f *fakeEvents) BulkGet(ctx context.Context, keys []string) (map[string]keyvalue.Value[State], error) {
+	f.bulkGetCalled.Add(1)
+	if f.onBulkGetCalled != nil {
+		f.onBulkGetCalled(keys)
+	}
+	return f.bulkGetResp, f.bulkGetErr
+}
+
+func (f *fakeEvents) BulkSet(ctx context.Context, values map[string]keyvalue.Value[State]) error {
+	f.bulkSetCalled.Add(1)
+	if f.onBulkSetCalled != nil {
+		f.onBulkSetCalled(values)
+	}
+	return f.bulkSetErr
+}
+
+func TestService(t *testing.T) {
+	t.Run("commitOnTransaction should not commit when empty changes are privided", func(t *testing.T) {
+		service := &svc{}
+		assert.Nil(t, service.commitOnTransaction(context.Background(), nil))
+	})
+	t.Run("commitOnTransaction should return error when bulkset returns an error", func(t *testing.T) {
+		const fakeID = "fake-id"
+		fakeErr := errors.New("fake-set-kv-err")
+		events := &fakeEvents{
+			bulkSetErr: fakeErr,
+		}
+		service := &svc{
+			events: events,
+		}
+		assert.Equal(t, service.commitOnTransaction(context.Background(), map[string]*Agg{
+			fakeID: {},
+		}), fakeErr)
+		assert.Equal(t, int64(1), events.bulkSetCalled.Load())
 	})
 
-	t.Run("uncommitted should confirm event when transaction is committed", func(t *testing.T) {
-		agg := &Agg{}
-		agg.WithChange([]byte(``))
-		agg.Events = agg.eventsWith(nil, false, time.Now().UTC())
-		u := &uncommitted{
-			agg:      agg,
-			eventIdx: 0,
-			event:    agg.Events[0],
+	t.Run("commitOnTransaction should error when transaction returns an error", func(t *testing.T) {
+		const fakeID1, fakeID2 = "fake-id-1", "fake-id-2"
+		fakeErr := errors.New("fake-transaction-err")
+		events := &fakeEvents{}
+		transactionSvc := &fakeTransactionSvc{
+			withinTransactionErr: fakeErr,
 		}
-		time.Now().UTC()
-		u.apply(&transaction.Transaction{
-			Status:    transaction.COMMITTED,
-			StartedAt: time.Now().UTC(),
-		})
+		service := &svc{
+			events: events,
+			tSvc:   transactionSvc,
+		}
+		assert.Equal(t, service.commitOnTransaction(context.Background(), map[string]*Agg{
+			fakeID1: {},
+			fakeID2: {},
+		}), fakeErr)
+		assert.Equal(t, int64(0), events.bulkSetCalled.Load())
+		assert.Equal(t, int64(1), transactionSvc.withinTransactionCalled.Load())
+	})
+	t.Run("commitOnTransaction should commit using transaction when multiple aggregates have changed", func(t *testing.T) {
+		const fakeID1, fakeID2 = "fake-id-1", "fake-id-2"
+		called := 0
 
-		assert.NotEmpty(t, agg.Events)
-		assert.False(t, agg.Events[0].Uncommitted)
+		var waitForBackgroundCommit sync.WaitGroup
+		waitForBackgroundCommit.Add(1)
+		events := &fakeEvents{
+			onBulkSetCalled: func(_ map[string]keyvalue.Value[State]) {
+				called++
+				if called == 2 {
+					waitForBackgroundCommit.Done()
+				}
+			},
+		}
+		transactionSvc := &fakeTransactionSvc{
+			onWithinTransactionCalled: func(f func(transactionID string, startedAt time.Time) error) error {
+				return f("", time.Now().UTC())
+			},
+		}
+		service := &svc{
+			tSvc:   transactionSvc,
+			events: events,
+		}
+		require.NoError(t, service.commitOnTransaction(context.Background(), map[string]*Agg{
+			fakeID1: {},
+			fakeID2: {},
+		}))
+		waitForBackgroundCommit.Wait()
+		assert.Equal(t, int64(2), events.bulkSetCalled.Load())
+		assert.Equal(t, int64(1), transactionSvc.withinTransactionCalled.Load())
+	})
+	t.Run("GetBatch should return error when event transaction is not found", func(t *testing.T) {
+		fakeID := "fake-id"
+		events := &fakeEvents{
+			bulkGetResp: map[string]keyvalue.Value[State]{
+				fakeID: {
+					Content: State{
+						Events: []Event{{
+							State:         []byte{},
+							Uncommitted:   true,
+							TransactionID: &fakeID,
+							Deleted:       false,
+							CreatedAt:     time.Time{},
+						}},
+						Dirty: true,
+					},
+					Version: "",
+				},
+			},
+		}
+		transactionSvc := &fakeTransactionSvc{}
+		service := &svc{
+			tSvc:   transactionSvc,
+			events: events,
+		}
+		_, _, err := service.GetBatch(context.TODO(), []string{})
+		assert.EqualError(t, err, fmt.Sprintf("transaction %s not found", fakeID))
+		assert.Equal(t, int64(1), events.bulkGetCalled.Load())
+		assert.Equal(t, int64(1), transactionSvc.bulkGetCalled.Load())
+	})
+	t.Run("GetBatch should return only valid events", func(t *testing.T) {
+		fakeID := "fake-id"
+		events := &fakeEvents{
+			bulkGetResp: map[string]keyvalue.Value[State]{
+				fakeID: {
+					Content: State{
+						Events: []Event{{
+							State:         []byte{},
+							Uncommitted:   true,
+							TransactionID: &fakeID,
+							Deleted:       false,
+							CreatedAt:     time.Time{},
+						}},
+						Dirty: true,
+					},
+					Version: "",
+				},
+			},
+		}
+		transactionSvc := &fakeTransactionSvc{
+			bulkGetResp: map[string]*transaction.Transaction{
+				fakeID: {
+					Status:    transaction.STARTED,
+					StartedAt: time.Now().UTC().Add(-time.Hour),
+				},
+			},
+		}
+		service := &svc{
+			tSvc:   transactionSvc,
+			events: events,
+		}
+		aggs, _, err := service.GetBatch(context.TODO(), []string{})
+		require.NoError(t, err)
+		assert.Empty(t, aggs.History(fakeID))
+		assert.Equal(t, int64(1), events.bulkGetCalled.Load())
+		assert.Equal(t, int64(1), transactionSvc.bulkGetCalled.Load())
+	})
+	t.Run("GetBatch should check for committed transactions", func(t *testing.T) {
+		fakeID := "fake-id"
+		events := &fakeEvents{
+			bulkGetResp: map[string]keyvalue.Value[State]{
+				fakeID: {
+					Content: State{
+						Events: []Event{{
+							State:         []byte{},
+							Uncommitted:   true,
+							TransactionID: &fakeID,
+							Deleted:       false,
+							CreatedAt:     time.Time{},
+						}},
+						Dirty: true,
+					},
+					Version: "",
+				},
+			},
+		}
+		transactionSvc := &fakeTransactionSvc{
+			bulkGetResp: map[string]*transaction.Transaction{
+				fakeID: {
+					Status: transaction.COMMITTED,
+				},
+			},
+		}
+		service := &svc{
+			tSvc:   transactionSvc,
+			events: events,
+		}
+		aggs, _, err := service.GetBatch(context.TODO(), []string{})
+		require.NoError(t, err)
+		assert.NotEmpty(t, aggs.History(fakeID))
+		assert.Equal(t, int64(1), events.bulkGetCalled.Load())
+		assert.Equal(t, int64(1), transactionSvc.bulkGetCalled.Load())
+	})
+	t.Run("Persist after GetBatch should commit uncommitted events", func(t *testing.T) {
+		fakeID := "fake-id"
+		events := &fakeEvents{
+			bulkGetResp: map[string]keyvalue.Value[State]{
+				fakeID: {
+					Content: State{
+						Events: []Event{{
+							State:         []byte{},
+							Uncommitted:   true,
+							TransactionID: &fakeID,
+							Deleted:       false,
+							CreatedAt:     time.Time{},
+						}},
+						Dirty: true,
+					},
+					Version: "",
+				},
+			},
+		}
+		transactionSvc := &fakeTransactionSvc{
+			bulkGetResp: map[string]*transaction.Transaction{
+				fakeID: {
+					Status: transaction.COMMITTED,
+				},
+			},
+		}
+		service := &svc{
+			tSvc:   transactionSvc,
+			events: events,
+		}
+		aggs, persist, err := service.GetBatch(context.TODO(), []string{})
+		require.NoError(t, err)
+		assert.NotEmpty(t, aggs.History(fakeID))
+		assert.Equal(t, int64(1), events.bulkGetCalled.Load())
+		assert.Equal(t, int64(1), transactionSvc.bulkGetCalled.Load())
+		assert.Equal(t, int64(0), events.bulkSetCalled.Load())
+
+		persist()
+
+		assert.Equal(t, int64(1), events.bulkSetCalled.Load())
+	})
+	t.Run("Persist after GetBatch should commit on transaction when multiple aggregates have changed", func(t *testing.T) {
+		fakeID := "fake-id"
+		const fakeID2 = "fake-id-2"
+		events := &fakeEvents{
+			bulkGetResp: map[string]keyvalue.Value[State]{
+				fakeID2: {
+					Content: State{
+						Events: []Event{},
+						Dirty:  false,
+					},
+					Version: "",
+				},
+				fakeID: {
+					Content: State{
+						Events: []Event{{
+							State:         []byte{},
+							Uncommitted:   true,
+							TransactionID: &fakeID,
+							Deleted:       false,
+							CreatedAt:     time.Time{},
+						}},
+						Dirty: true,
+					},
+					Version: "",
+				},
+			},
+		}
+		transactionSvc := &fakeTransactionSvc{
+			onWithinTransactionCalled: func(f func(transactionID string, startedAt time.Time) error) error {
+				return f("", time.Now())
+			},
+			bulkGetResp: map[string]*transaction.Transaction{
+				fakeID: {
+					Status: transaction.COMMITTED,
+				},
+			},
+		}
+		service := &svc{
+			tSvc:   transactionSvc,
+			events: events,
+		}
+		aggs, persist, err := service.GetBatch(context.TODO(), []string{})
+		require.NoError(t, err)
+		assert.NotEmpty(t, aggs.History(fakeID))
+		assert.Equal(t, int64(1), events.bulkGetCalled.Load())
+		assert.Equal(t, int64(1), transactionSvc.bulkGetCalled.Load())
+		assert.Equal(t, int64(0), events.bulkSetCalled.Load())
+		aggs.WithChange(fakeID2, []byte(`change`))
+
+		persist()
+
+		assert.Equal(t, int64(1), transactionSvc.withinTransactionCalled.Load())
+		assert.Equal(t, int64(1), events.bulkSetCalled.Load())
 	})
 }

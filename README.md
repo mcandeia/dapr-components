@@ -9,7 +9,7 @@ This project uses [Go Plugins](https://pkg.go.dev/plugin), it compiles the compo
 You can select a subset of all components by just providing `COMPONENTS=` environment variable.
 
 ```shell
-COMPONENTS="jsonlogic aws-qldb" make build-all
+COMPONENTS="jsonlogic ledger" make build-all
 ```
 
 ## Components

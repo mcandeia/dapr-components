@@ -15,11 +15,9 @@ package aggregate
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
-	"github.com/dapr/components-contrib/state/utils"
 	"github.com/mcandeia/dapr-components/ledger/keyvalue"
 	"github.com/mcandeia/dapr-components/ledger/transaction"
 )
@@ -27,106 +25,6 @@ import (
 type Service interface {
 	// GetBatch returns aggregates and a function that persist aggregate changes
 	GetBatch(ctx context.Context, ids []string) (aggs *AggBatch, persist func() error, err error)
-}
-
-type Event struct {
-	State         []byte    `json:"state"`
-	Uncommitted   bool      `json:"uncommitted"`
-	TransactionID *string   `json:"transactionId"`
-	Deleted       bool      `json:"deleted"`
-	CreatedAt     time.Time `json:"createdAt"`
-}
-
-func (evt Event) confirmed() Event {
-	return Event{
-		State:         evt.State,
-		Uncommitted:   false,
-		TransactionID: evt.TransactionID,
-		Deleted:       evt.Deleted,
-		CreatedAt:     evt.CreatedAt,
-	}
-}
-
-type AggBatch struct {
-	batch          map[string]*Agg
-	hasUncommitted bool
-}
-
-func (agg *AggBatch) WithChange(id string, state any) error {
-	serialized, err := utils.Marshal(state, json.Marshal)
-	if err != nil {
-		return err
-	}
-	agg.batch[id].WithChange(serialized)
-	agg.hasUncommitted = true
-	return nil
-}
-
-func (agg *AggBatch) State(id string) ([]byte, string) {
-	return agg.batch[id].CurrentState()
-}
-func (agg *AggBatch) History(id string) []Event {
-	return agg.batch[id].History()
-}
-
-type Agg struct {
-	Events      []Event
-	uncommitted [][]byte
-	Version     string
-}
-
-func (agg *Agg) History() []Event {
-	events := make([]Event, 0)
-	for _, evnt := range agg.Events {
-		if evnt.Uncommitted {
-			continue
-		}
-		events = append(events, evnt)
-	}
-	return events
-}
-
-func (agg *Agg) CurrentState() ([]byte, string) {
-	for _, evnt := range agg.Events {
-		if !evnt.Uncommitted {
-			return evnt.State, agg.Version
-		}
-	}
-	return nil, agg.Version
-}
-
-func (agg *Agg) WithChange(state []byte) {
-	agg.uncommitted = append(agg.uncommitted, state)
-}
-
-func (agg *Agg) preparePersistNoDirty() keyvalue.Value[State] {
-	return agg.preparePersist(nil, true, time.Now().UTC())
-}
-
-func (agg *Agg) preparePersist(transactionID *string, committed bool, startedAt time.Time) keyvalue.Value[State] {
-	return keyvalue.Value[State]{
-		Content: State{
-			Events: agg.eventsWith(transactionID, committed, startedAt),
-			Dirty:  !committed,
-		},
-		Version: agg.Version,
-	}
-}
-
-func (agg *Agg) eventsWith(transactionID *string, committed bool, startedAt time.Time) []Event {
-	pendingEvents := make([]Event, len(agg.uncommitted))
-
-	for idx, uncommitted := range agg.uncommitted {
-		event := Event{
-			State:         uncommitted,
-			Uncommitted:   !committed,
-			TransactionID: transactionID,
-			Deleted:       uncommitted == nil,
-			CreatedAt:     startedAt,
-		}
-		pendingEvents[len(pendingEvents)-idx-1] = event // back to front
-	}
-	return append(pendingEvents, agg.Events...)
 }
 
 type State struct {
@@ -139,22 +37,10 @@ type svc struct {
 	tSvc   transaction.Service
 }
 
-type uncommitted struct {
-	agg      *Agg
-	eventIdx int
-	event    Event
-}
-
-func (u *uncommitted) apply(t *transaction.Transaction) {
-	if t.Aborted() {
-		// remove aborted event
-		u.agg.Events = append(u.agg.Events[:u.eventIdx], u.agg.Events[u.eventIdx+1:]...)
-	} else {
-		u.agg.Events[u.eventIdx] = u.event.confirmed()
-	}
-}
-
 func (s *svc) commitOnTransaction(ctx context.Context, aggs map[string]*Agg) error {
+	if len(aggs) == 0 {
+		return nil
+	}
 	if len(aggs) == 1 { // no transaction required
 		var firstKey string
 		for k := range aggs {

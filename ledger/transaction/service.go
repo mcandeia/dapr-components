@@ -48,7 +48,7 @@ func (t Transaction) IsOngoing() bool {
 }
 
 func (t Transaction) Aborted() bool {
-	return t.Status != COMMITTED && !t.IsOngoing()
+	return t.Status != COMMITTED && t.IsOngoing()
 }
 
 func (t Transaction) Commit() Transaction {

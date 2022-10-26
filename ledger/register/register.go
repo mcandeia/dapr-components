@@ -11,8 +11,23 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package component
 
 import (
-	_ "github.com/mcandeia/dapr-components/ledger/register"
+	dapr "github.com/dapr-sandbox/components-go-sdk"
+	"github.com/dapr-sandbox/components-go-sdk/bindings/v1"
+	"github.com/dapr-sandbox/components-go-sdk/state/v1"
+
+	ledger "github.com/mcandeia/dapr-components/ledger/ledger"
 )
+
+func init() {
+	dapr.Register("ledger",
+		dapr.WithStateStore(func() state.Store {
+			return ledger.New()
+		}),
+		dapr.WithOutputBinding(func() bindings.OutputBinding {
+			return ledger.NewJournal()
+		}),
+	)
+}

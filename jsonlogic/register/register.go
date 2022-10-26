@@ -11,8 +11,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package register
 
 import (
-	_ "github.com/mcandeia/dapr-components/ledger/register"
+	dapr "github.com/dapr-sandbox/components-go-sdk"
+	"github.com/dapr-sandbox/components-go-sdk/bindings/v1"
+	"github.com/mcandeia/dapr-components/jsonlogic/jsonlogic"
 )
+
+func init() {
+	dapr.Register("jsonlogic",
+		dapr.WithOutputBinding(func() bindings.OutputBinding {
+			return &jsonlogic.JsonLogicOutput{}
+		}),
+	)
+}

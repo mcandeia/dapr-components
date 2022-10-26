@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package jsonlogic
 
 import (
 	"context"
@@ -28,7 +28,7 @@ import (
 )
 
 func TestJsonLogicBinding(t *testing.T) {
-	jsonLogic := jsonLogicOutput{}
+	jsonLogic := JsonLogicOutput{}
 	t.Run("invoking an unsupported operation should return an error", func(t *testing.T) {
 		const fakeOperation = "fake-operation"
 		_, err := jsonLogic.Invoke(context.Background(), &contribBindings.InvokeRequest{

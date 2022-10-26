@@ -14,5 +14,12 @@ limitations under the License.
 package main
 
 import (
+	_ "github.com/mcandeia/dapr-components/jsonlogic/register"
 	_ "github.com/mcandeia/dapr-components/ledger/register"
+
+	dapr "github.com/dapr-sandbox/components-go-sdk"
 )
+
+func main() {
+	dapr.MustRun()
+}

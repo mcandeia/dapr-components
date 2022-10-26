@@ -1,6 +1,10 @@
-module github.com/mcandeia/dapr-components
+module github.com/mcandeia/dapr-components/cmd/mesh
 
 go 1.19
+
+replace github.com/mcandeia/dapr-components/jsonlogic => ../../jsonlogic
+
+replace github.com/mcandeia/dapr-components/ledger => ../../ledger
 
 require (
 	github.com/dapr-sandbox/components-go-sdk v0.0.0-20221025155417-d8c054a9caa8

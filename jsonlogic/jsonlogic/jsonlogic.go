@@ -11,7 +11,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package jsonlogic
 
 import (
 	"context"
@@ -19,9 +19,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-
-	dapr "github.com/dapr-sandbox/components-go-sdk"
-	"github.com/dapr-sandbox/components-go-sdk/bindings/v1"
 
 	contribBindings "github.com/dapr/components-contrib/bindings"
 
@@ -46,16 +43,16 @@ type evaluationRequest struct {
 	Expression any `json:"expression"`
 }
 
-// jsonLogicOutput is the jsonLogicOutput output binding to evaluate jsonLogicOutput expressions.
-type jsonLogicOutput struct{}
+// JsonLogicOutput is the JsonLogicOutput output binding to evaluate JsonLogicOutput expressions.
+type JsonLogicOutput struct{}
 
 // Init performs metadata parsing.
-func (jl *jsonLogicOutput) Init(metadata contribBindings.Metadata) error {
+func (jl *JsonLogicOutput) Init(metadata contribBindings.Metadata) error {
 	return nil
 }
 
 // evaluate gets the data and the logic expression and return the bindings invoke response after the rule evaluation against the received data.
-func (jl *jsonLogicOutput) evaluate(evalReq *evaluationRequest) (*contribBindings.InvokeResponse, error) {
+func (jl *JsonLogicOutput) evaluate(evalReq *evaluationRequest) (*contribBindings.InvokeResponse, error) {
 	rawJSON, err := jsonlogic.ApplyInterface(evalReq.Expression, evalReq.Data)
 	if err != nil {
 		return nil, err
@@ -73,7 +70,7 @@ func (jl *jsonLogicOutput) evaluate(evalReq *evaluationRequest) (*contribBinding
 }
 
 // Invoke is called for output bindings.
-func (jl *jsonLogicOutput) Invoke(ctx context.Context, req *contribBindings.InvokeRequest) (*contribBindings.InvokeResponse, error) {
+func (jl *JsonLogicOutput) Invoke(ctx context.Context, req *contribBindings.InvokeRequest) (*contribBindings.InvokeResponse, error) {
 	data, err := strconv.Unquote(string(req.Data))
 	if err != nil {
 		return nil, err
@@ -93,14 +90,6 @@ func (jl *jsonLogicOutput) Invoke(ctx context.Context, req *contribBindings.Invo
 }
 
 // Operations enumerates supported binding operations.
-func (jl *jsonLogicOutput) Operations() []contribBindings.OperationKind {
+func (jl *JsonLogicOutput) Operations() []contribBindings.OperationKind {
 	return []contribBindings.OperationKind{evaluateOperation}
-}
-
-func init() {
-	dapr.Register("jsonlogic",
-		dapr.WithOutputBinding(func() bindings.OutputBinding {
-			return &jsonLogicOutput{}
-		}),
-	)
 }

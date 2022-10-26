@@ -14,5 +14,5 @@ limitations under the License.
 package main
 
 import (
-	_ "github.com/mcandeia/dapr-components/ledger/register"
+	_ "github.com/mcandeia/dapr-components/jsonlogic/register"
 )

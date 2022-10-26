@@ -5,3 +5,5 @@ use ./jsonlogic
 use ./ledger
 
 use ./internal
+
+use ./cmd/mesh

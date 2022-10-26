@@ -5,8 +5,8 @@ go 1.19
 replace github.com/mcandeia/dapr-components/internal => ../internal
 
 require (
-	github.com/dapr-sandbox/components-go-sdk v0.0.0-20221003195517-c90c5baa2b8d
-	github.com/dapr/components-contrib v1.9.0-rc.1
+	github.com/dapr-sandbox/components-go-sdk v0.0.0-20221025155417-d8c054a9caa8
+	github.com/dapr/components-contrib v1.9.0-rc.5
 	github.com/mcandeia/dapr-components/internal v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.8.0
 )
@@ -18,9 +18,9 @@ require (
 )
 
 require (
-	github.com/dapr/dapr v1.9.0-rc.1 // indirect
+	github.com/dapr/dapr v1.9.0 // indirect
 	github.com/dapr/go-sdk v1.5.1-0.20221004175845-b465b1fa0721
-	github.com/dapr/kit v0.0.2
+	github.com/dapr/kit v0.0.3-0.20220930182601-272e358ba6a7
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/google/uuid v1.3.0
 	github.com/mitchellh/mapstructure v1.5.1-0.20220423185008-bf980b35cac4 // indirect
